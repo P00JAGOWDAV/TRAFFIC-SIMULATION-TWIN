@@ -56,7 +56,7 @@ const DEMOS = [
   { label: "Everything at once", level: "peak_hour", events: ["surge", "blocked_lane", "spillback", "ambulance"] },
 ];
 
-export default function ScenarioLab({ apiBase = DEFAULT_API }) {
+export default function ScenarioLab({ apiBase = DEFAULT_API, autoRun = false }) {
   const [meta, setMeta] = useState(null);
   const [metaError, setMetaError] = useState("");
   const [level, setLevel] = useState("normal");
@@ -73,6 +73,18 @@ export default function ScenarioLab({ apiBase = DEFAULT_API }) {
       .then(setMeta)
       .catch((e) => setMetaError(`Could not load scenarios from the backend (${e.message}).`));
   }, [apiBase]);
+
+  // Optional: run the rush-hour demo once when the page opens.
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (meta && autoRun && !autoRan.current) {
+      autoRan.current = true;
+      const d = DEMOS[1];
+      setLevel(d.level);
+      setEvents(d.events);
+      run(d.level, d.events, {});
+    }
+  }, [meta, autoRun]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const chosen = [level, ...events];
   const activeGroups = ["always", ...events.filter((e) => FIELD_GROUPS[e])];
@@ -222,7 +234,12 @@ function Results({ data, apiBase }) {
   const [speed, setSpeed] = useState(30);
   const last = useRef(null);
 
-  useEffect(() => { setTime(0); setPlaying(false); }, [data]);
+  // Open the playback one minute before the ambulance arrives (or at the start).
+  useEffect(() => {
+    const req = data.config && data.config.ambulance_request_s;
+    setTime(typeof req === "number" ? Math.max(0, Math.round((req - 60) / step) * step) : 0);
+    setPlaying(false);
+  }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!playing) { last.current = null; return undefined; }

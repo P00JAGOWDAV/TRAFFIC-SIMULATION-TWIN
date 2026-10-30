@@ -1,23 +1,24 @@
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  Activity, AlertTriangle, Ambulance, ArrowDown,
-  ArrowUp, CarFront, Clock3, Gauge, GitCompareArrows,
-  RefreshCw, ShieldCheck, TrafficCone, Zap
+  Activity, AlertTriangle, Ambulance, CarFront, Clock3, Gauge, GitCompareArrows,
+  RefreshCw, ShieldCheck, TrafficCone, Zap, Target, Lightbulb, Trophy
 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, Legend
+  Tooltip, ResponsiveContainer
 } from 'recharts'
 import './App.css'
+import './Enhancements.css'
 import ScenarioLab from "./ScenarioLab.jsx";
 
 const API = 'http://127.0.0.1:8000'
 
+// Same names as the Scenario Lab, so the whole page uses one vocabulary.
 const strategies = [
-  { key: 'fixed_time', label: 'Fixed Time' },
-  { key: 'fixed_time+preemption', label: 'Preemption' },
-  { key: 'coordinated+preemption', label: 'Coordinated + Preemption' },
+  { key: 'fixed_time', label: 'Fixed-time' },
+  { key: 'fixed_time+preemption', label: 'Fixed + ambulance priority' },
+  { key: 'coordinated+preemption', label: 'Coordinated + ambulance priority' },
 ]
 
 const initialConfig = {
@@ -43,7 +44,23 @@ const initialConfig = {
   record_history: false,
 }
 
-function MetricCard({ title, value, unit, icon: Icon, note }) {
+const NAV = [
+  { id: 'overview', label: 'Overview', icon: Gauge },
+  { id: 'lab', label: 'Simulation', icon: Activity },
+  { id: 'compare', label: 'Comparisons', icon: GitCompareArrows },
+  { id: 'emergency', label: 'Emergency response', icon: Ambulance },
+]
+
+// Percentage change of value vs baseline, as an honest "up/down" note.
+function changeNote(value, baseline, lowerIsBetter) {
+  if (typeof value !== 'number' || typeof baseline !== 'number' || baseline === 0) return null
+  const pct = Math.round(((value - baseline) / baseline) * 100)
+  if (pct === 0) return { text: 'same as fixed-time', good: null }
+  const better = lowerIsBetter ? pct < 0 : pct > 0
+  return { text: `${pct > 0 ? '+' : ''}${pct}% vs fixed-time`, good: better }
+}
+
+function MetricCard({ title, value, unit, icon: Icon, note, change }) {
   return (
     <article className="metric-card">
       <div className="metric-top">
@@ -51,6 +68,9 @@ function MetricCard({ title, value, unit, icon: Icon, note }) {
         <Icon size={19} />
       </div>
       <div className="metric-value">{value ?? '—'} <small>{unit}</small></div>
+      {change && (
+        <p className={`tt-delta ${change.good === true ? 'good' : change.good === false ? 'bad' : ''}`}>{change.text}</p>
+      )}
       <p>{note}</p>
     </article>
   )
@@ -62,6 +82,8 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [config, setConfig] = useState(initialConfig)
+  const [active, setActive] = useState('overview')
+  const autoRan = useRef(false)
 
   async function checkHealth() {
     try {
@@ -101,9 +123,25 @@ function App() {
     checkHealth()
   }, [])
 
+  // Run the baseline comparison once as soon as the backend is reachable,
+  // so the page never opens empty.
+  useEffect(() => {
+    if (health === 'Connected' && !autoRan.current) {
+      autoRan.current = true
+      runSimulation()
+    }
+  }, [health]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function goTo(id) {
+    setActive(id)
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   const results = data?.comparison?.results || {}
+  const fixed = results['fixed_time']
   const coordinated = results['coordinated+preemption']
   const ambulance = coordinated?.ambulance
+  const fixedAmb = fixed?.ambulance
   const chartData = strategies.map(({ key, label }) => {
     const item = results[key]
     return {
@@ -115,19 +153,35 @@ function App() {
     }
   })
 
+  // Headline numbers for the story cards (computed, never hard-coded).
+  const blockedChange = changeNote(coordinated?.spillback_blocked_seconds, fixed?.spillback_blocked_seconds, true)
+  const ambSaved = typeof fixedAmb?.travel_time_s === 'number' && typeof ambulance?.travel_time_s === 'number'
+    ? fixedAmb.travel_time_s - ambulance.travel_time_s : null
+
+  let ambulanceText = 'Run the simulation to evaluate emergency vehicle response.'
+  if (ambulance) {
+    if (!ambulance.completed) ambulanceText = 'With coordinated control the ambulance did not finish within the simulated time.'
+    else if (ambSaved !== null) ambulanceText = ambSaved >= 0
+      ? `Coordinated control got the ambulance through ${ambSaved} s faster than fixed-time (${fixedAmb.travel_time_s} s → ${ambulance.travel_time_s} s). Free-flow time is ${ambulance.free_flow_s} s.`
+      : `Coordinated control was ${-ambSaved} s slower than fixed-time for the ambulance in this run.`
+    else if (fixedAmb && !fixedAmb.completed) ambulanceText = `The ambulance finished in ${ambulance.travel_time_s} s with coordinated control, but did not finish at all under fixed-time.`
+    else ambulanceText = `The ambulance finished its corridor journey in ${ambulance.travel_time_s} s.`
+  }
+
   return (
     <main className="app-shell">
-      <aside className="sidebar">
+      <aside className="sidebar tt-sticky">
         <div className="brand">
           <div className="brand-icon"><TrafficCone size={25} /></div>
           <div><strong>TrafficTwin</strong><span>INTELLIGENT MOBILITY</span></div>
         </div>
 
         <p className="nav-label">WORKSPACE</p>
-        <div className="nav-item active"><Gauge size={18} /> Overview</div>
-        <div className="nav-item"><Activity size={18} /> Simulation</div>
-        <div className="nav-item"><GitCompareArrows size={18} /> Comparisons</div>
-        <div className="nav-item"><Ambulance size={18} /> Emergency response</div>
+        {NAV.map(({ id, label, icon: Icon }) => (
+          <button key={id} type="button" className={`nav-item tt-nav-btn ${active === id ? 'active' : ''}`} onClick={() => goTo(id)}>
+            <Icon size={18} /> {label}
+          </button>
+        ))}
 
         <div className="sidebar-bottom">
           <div className="connection">
@@ -139,9 +193,9 @@ function App() {
       </aside>
 
       <section className="main-content">
-        <header className="topbar">
+        <header className="topbar" id="overview">
           <div>
-            <span className="eyebrow">TRAFFIC INTELLIGENCE PLATFORM</span>
+            <span className="eyebrow">CHALLENGE: SPILLBACK AND THE AMBULANCE</span>
             <h1>Corridor Overview</h1>
           </div>
           <button className="refresh-btn" onClick={checkHealth}>
@@ -154,17 +208,48 @@ function App() {
             <h2>Monitor. Predict. Optimize.</h2>
             <p>Simulate congestion, prevent spillback and prioritize emergency vehicles.</p>
           </div>
-          <div className="live-pill"><span className="status-dot online" /> SIMULATION READY</div>
+          <div className="live-pill">
+            <span className={`status-dot ${health === 'Connected' ? 'online' : ''}`} />
+            {health === 'Connected' ? 'SIMULATION READY' : health === 'Checking' ? 'CONNECTING…' : 'BACKEND OFFLINE'}
+          </div>
+        </section>
+
+        {health === 'Disconnected' && (
+          <p className="error-message">The backend is not reachable at {API}. Start it with: python -m uvicorn app.main:app --reload</p>
+        )}
+
+        <section className="tt-story">
+          <article className="panel">
+            <div className="tt-story-icon"><Target size={20} /></div>
+            <span className="eyebrow">THE PROBLEM</span>
+            <h3>Queues spill back</h3>
+            <p>When the road between two junctions fills up, cars cannot leave the junction behind it, even on green. The jam spreads upstream and traps ambulances.</p>
+          </article>
+          <article className="panel">
+            <div className="tt-story-icon"><Lightbulb size={20} /></div>
+            <span className="eyebrow">OUR APPROACH</span>
+            <h3>Coordinate + prioritise</h3>
+            <p>Signals watch how full the next road is: they hold back traffic that has nowhere to go and flush full roads. Ambulances get a safe green wave (yellow and all-red are never skipped), then signals recover.</p>
+          </article>
+          <article className="panel">
+            <div className="tt-story-icon"><Trophy size={20} /></div>
+            <span className="eyebrow">RESULT (LIVE, THIS RUN)</span>
+            <h3>{ambSaved !== null ? `Ambulance ${ambSaved >= 0 ? `${ambSaved} s faster` : `${-ambSaved} s slower`}` : ambulance?.completed ? 'Ambulance got through' : 'Running…'}</h3>
+            <p>
+              {blockedChange ? `Spillback blocking ${blockedChange.good ? 'down' : 'up'} ${blockedChange.text.replace(' vs fixed-time', '').replace(/[+-]/, '')} compared with fixed-time. ` : ''}
+              {coordinated && fixed ? `${Math.abs(coordinated.completed_vehicles - fixed.completed_vehicles)} ${coordinated.completed_vehicles >= fixed.completed_vehicles ? 'more' : 'fewer'} ordinary cars finished — a trade-off we report honestly.` : 'Results appear automatically when the backend is connected.'}
+            </p>
+          </article>
         </section>
 
         <section className="corridor-panel panel">
           <div className="section-heading">
             <div><span className="eyebrow">NETWORK TOPOLOGY</span><h2>Three-Junction Corridor</h2></div>
-            <span className="muted">Junction 01 — 02 — 03</span>
+            <span className="muted">J0 → L0 → J1 → L1 → J2 (eastbound main road)</span>
           </div>
 
           <div className="corridor">
-            {[1, 2, 3].map((junction, index) => (
+            {[0, 1, 2].map((junction) => (
               <div className="junction-group" key={junction}>
                 <div className="junction">
                   <div className="road horizontal" />
@@ -173,28 +258,37 @@ function App() {
                   <div className="signal signal-bottom"><i /><i /><i /></div>
                   <div className="junction-center"><TrafficCone size={20} /></div>
                 </div>
-                <strong>Junction 0{junction}</strong>
-                <small>{index === 0 ? 'Entry point' : index === 2 ? 'Exit point' : 'Intermediate'}</small>
+                <strong>Junction J{junction}</strong>
+                <small>{junction === 0 ? 'Entry point' : junction === 2 ? 'Exit point' : 'Intermediate'}</small>
               </div>
             ))}
           </div>
           <div className="corridor-legend">
             <span><i className="legend-road" /> Main corridor</span>
             <span><i className="legend-green" /> Signal indicator (illustrative)</span>
-            <span><i className="legend-link" /> Finite-capacity links</span>
+            <span><i className="legend-link" /> Finite-capacity roads L0, L1</span>
           </div>
         </section>
 
-        <section className="section-heading results-heading">
-          <div><span className="eyebrow">PERFORMANCE MONITORING</span><h2>Simulation results</h2></div>
-          <span className="muted">Updates after each run</span>
+        <div id="lab" className="tt-anchor">
+          <ScenarioLab apiBase={API} autoRun />
+        </div>
+
+        <section className="section-heading results-heading" id="compare">
+          <div><span className="eyebrow">BASELINE STRESS TEST</span><h2>Quick strategy comparison</h2></div>
+          <span className="muted">Coordinated + ambulance priority, compared with fixed-time</span>
         </section>
 
         <section className="metrics-grid">
-          <MetricCard title="Vehicles completed" value={coordinated?.completed_vehicles} unit="vehicles" icon={CarFront} note="Coordinated + preemption" />
-          <MetricCard title="Spillback events" value={coordinated?.spillback_events} unit="events" icon={AlertTriangle} note="Lower is better" />
-          <MetricCard title="Blocked time" value={coordinated?.spillback_blocked_seconds} unit="seconds" icon={Clock3} note="Spillback blockage duration" />
-          <MetricCard title="Ambulance travel" value={ambulance?.travel_time_s} unit="seconds" icon={Ambulance} note={ambulance?.completed ? 'Ambulance completed route' : 'Awaiting simulation'} />
+          <MetricCard title="Vehicles completed" value={coordinated?.completed_vehicles} unit="vehicles" icon={CarFront}
+            note="Higher is better" change={changeNote(coordinated?.completed_vehicles, fixed?.completed_vehicles, false)} />
+          <MetricCard title="Spillback events" value={coordinated?.spillback_events} unit="events" icon={AlertTriangle}
+            note="Lower is better" change={changeNote(coordinated?.spillback_events, fixed?.spillback_events, true)} />
+          <MetricCard title="Blocked time" value={coordinated?.spillback_blocked_seconds} unit="seconds" icon={Clock3}
+            note="Time junctions were blocked by full roads" change={blockedChange} />
+          <MetricCard title="Ambulance travel" value={ambulance?.travel_time_s} unit="seconds" icon={Ambulance}
+            note={ambulance ? (ambulance.completed ? 'Ambulance completed route' : 'Did not finish in time') : 'Awaiting simulation'}
+            change={changeNote(ambulance?.travel_time_s, fixedAmb?.travel_time_s, true)} />
         </section>
 
         <section className="content-grid">
@@ -213,12 +307,12 @@ function App() {
                   <Bar dataKey="completed" name="Vehicles completed" fill="#22d3ee" radius={[5, 5, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <div className="empty-chart">Run a simulation to view throughput results.</div>}
+            ) : <div className="empty-chart">{loading ? 'Running…' : 'Run a simulation to view throughput results.'}</div>}
           </article>
 
           <article className="panel chart-panel">
             <div className="section-heading">
-              <div><span className="eyebrow">CONGESTION ANALYSIS</span><h2>Spillback events</h2></div>
+              <div><span className="eyebrow">CONGESTION ANALYSIS</span><h2>Seconds blocked by spillback</h2></div>
             </div>
             {data ? (
               <ResponsiveContainer width="100%" height={260}>
@@ -227,23 +321,27 @@ function App() {
                   <XAxis dataKey="strategy" stroke="#94a3b8" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#94a3b8" />
                   <Tooltip contentStyle={{ background: '#111c2d', border: '1px solid #334155', borderRadius: 8 }} />
-                  <Bar dataKey="spillback" name="Spillback events" fill="#fb923c" radius={[5, 5, 0, 0]} />
+                  <Bar dataKey="blocked" name="Seconds blocked" fill="#fb923c" radius={[5, 5, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <div className="empty-chart">Run a simulation to view spillback results.</div>}
+            ) : <div className="empty-chart">{loading ? 'Running…' : 'Run a simulation to view spillback results.'}</div>}
           </article>
         </section>
 
-        <section className="panel ambulance-panel">
+        <section className="panel ambulance-panel" id="emergency">
           <div className="ambulance-icon"><Ambulance size={25} /></div>
           <div className="ambulance-copy">
             <span className="eyebrow">EMERGENCY VEHICLE PRIORITY</span>
             <h2>Ambulance response tracking</h2>
-            <p>{ambulance?.completed ? 'The ambulance completed its simulated corridor journey.' : 'Run the simulation to evaluate emergency vehicle response.'}</p>
+            <p>{ambulanceText}</p>
           </div>
           <div className="ambulance-stat">
             <strong>{ambulance?.travel_time_s != null ? `${ambulance.travel_time_s}s` : '—'}</strong>
-            <small>Travel time</small>
+            <small>Travel time (coordinated)</small>
+          </div>
+          <div className="ambulance-stat">
+            <strong>{fixedAmb?.travel_time_s != null ? `${fixedAmb.travel_time_s}s` : fixedAmb ? 'DNF' : '—'}</strong>
+            <small>Travel time (fixed-time)</small>
           </div>
         </section>
 
@@ -281,26 +379,27 @@ function App() {
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Strategy</th><th>Completed</th><th>Spillback</th><th>Blocked seconds</th><th>Ambulance time</th></tr></thead>
+                <thead><tr><th>Strategy</th><th>Completed</th><th>Avg delay</th><th>Spillback</th><th>Blocked seconds</th><th>Ambulance time</th></tr></thead>
                 <tbody>
                   {strategies.map(({ key, label }) => {
                     const item = results[key]
+                    const amb = item?.ambulance
                     return <tr key={key}>
                       <td>{label}</td>
                       <td>{item?.completed_vehicles ?? '—'}</td>
+                      <td>{item?.average_delay_s != null ? `${item.average_delay_s}s` : '—'}</td>
                       <td>{item?.spillback_events ?? '—'}</td>
                       <td>{item?.spillback_blocked_seconds ?? '—'}</td>
-                      <td>{item?.ambulance?.travel_time_s ?? '—'}s</td>
+                      <td>{amb?.travel_time_s != null ? `${amb.travel_time_s}s` : amb?.requested ? 'Did not finish' : '—'}</td>
                     </tr>
                   })}
                 </tbody>
               </table>
             </div>
-            <ScenarioLab />
           </section>
         )}
 
-        <footer>TrafficTwin · Spillback and the Ambulance · Simulation prototype</footer>
+        <footer>TrafficTwin · Spillback and the Ambulance · Simplified simulation prototype, not certified traffic control</footer>
       </section>
     </main>
   )

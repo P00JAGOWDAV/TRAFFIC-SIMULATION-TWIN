@@ -1,0 +1,36 @@
+/* Small additions for the hackathon polish. Loaded after App.css; does not change existing rules. */
+
+/* Sidebar stays visible while scrolling, and its items are real buttons. */
+.tt-sticky { position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.tt-nav-btn {
+  width: 100%; background: transparent; border: 1px solid transparent;
+  text-align: left; cursor: pointer;
+}
+.tt-nav-btn:hover:not(.active) { background: #102236; color: #cfe8f3; }
+.tt-nav-btn:focus-visible { outline: 2px solid #22d3ee; outline-offset: 2px; }
+
+/* Anchor targets leave a little space above when scrolled to. */
+.tt-anchor, #overview, #compare, #emergency { scroll-margin-top: 16px; }
+
+/* Problem → approach → result story */
+.tt-story {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 22px 0;
+}
+.tt-story .panel { padding: 20px; }
+.tt-story h3 { margin: 6px 0 8px; font-size: 18px; color: #e5edf7; }
+.tt-story p { margin: 0; color: #91a2b8; font-size: 13.5px; line-height: 1.55; }
+.tt-story-icon {
+  width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+  background: #123246; color: #67e8f9; margin-bottom: 12px;
+}
+.tt-story article:last-child { border-color: #1c5061; background: linear-gradient(160deg, #10263a, #0f1a2b); }
+.tt-story article:last-child h3 { color: #67e8f9; }
+
+/* "+x% vs fixed-time" under the metric cards */
+.metric-card p.tt-delta { margin: 4px 0 0; font-weight: 600; font-size: 12.5px; color: #91a2b8; }
+.metric-card p.tt-delta.good { color: #4ade80; }
+.metric-card p.tt-delta.bad { color: #f87171; }
+
+@media (max-width: 1100px) {
+  .tt-story { grid-template-columns: 1fr; }
+}
