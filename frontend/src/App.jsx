@@ -1,73 +1,122 @@
-import { useEffect, useState } from 'react';
-import Sidebar from './components/layout/Sidebar.jsx';
-import { NAV_ITEMS } from './data/navigation.js';
-import Header from './components/layout/Header.jsx';
-import { useSimulation } from './hooks/useSimulation.js';
-import OverviewPage from './pages/OverviewPage.jsx';
-import SimulationPage from './pages/SimulationPage.jsx';
-import ComparisonPage from './pages/ComparisonPage.jsx';
-import StressTestPage from './pages/StressTestPage.jsx';
+import { useState } from 'react'
+import heroImg from './assets/hero.png'
+import reactLogo from './assets/react.svg'
+import viteLogo from './assets/vite.svg'
+import './App.css'
 
-const PAGES = {
-  overview: OverviewPage,
-  simulation: SimulationPage,
-  comparison: ComparisonPage,
-  stress: StressTestPage,
-};
-
-export default function App() {
-  const sim = useSimulation();
-  const [page, setPage] = useState('overview');
-  const [navOpen, setNavOpen] = useState(false);
-
-  const current = NAV_ITEMS.find((n) => n.id === page);
-  const Page = PAGES[page];
-
-  const navigate = (id) => {
-    setPage(id);
-    setNavOpen(false);
-    window.scrollTo({ top: 0 });
-  };
-
-  // Keyboard shortcuts for demos: 1–4 switch pages, R runs the simulation.
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const tag = e.target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.key === 'Escape') setNavOpen(false);
-      const idx = Number(e.key) - 1;
-      if (NAV_ITEMS[idx]) navigate(NAV_ITEMS[idx].id);
-      if ((e.key === 'r' || e.key === 'R') && sim.status !== 'running') sim.run();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
-
-  useEffect(() => {
-    document.title = `${current.title} · TrafficTwin`;
-  }, [current.title]);
+function App() {
+  const [count, setCount] = useState(0)
 
   return (
-    <div className="app">
-      <Sidebar active={page} onNavigate={navigate} open={navOpen} onClose={() => setNavOpen(false)} />
-      <div className="main">
-        <Header
-          title={current.title}
-          subtitle={current.subtitle}
-          onMenu={() => setNavOpen(true)}
-          onRun={sim.run}
-          status={sim.status}
-          result={sim.result}
-        />
-        <main className="content" id="main">
-          <Page sim={sim} />
-          <p className="footer-note">
-            TrafficTwin prototype · every number on this page is synthetic output from a local mock model, not
-            measured traffic data.
+    <>
+      <section id="center">
+        <div className="hero">
+          <img src={heroImg} className="base" width="170" height="179" alt="" />
+          <img src={reactLogo} className="framework" alt="React logo" />
+          <img src={viteLogo} className="vite" alt="Vite logo" />
+        </div>
+        <div>
+          <h1>Get started</h1>
+          <p>
+            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
           </p>
-        </main>
-      </div>
-    </div>
-  );
+        </div>
+        <button
+          type="button"
+          className="counter"
+          onClick={() => setCount((count) => count + 1)}
+        >
+          Count is {count}
+        </button>
+      </section>
+
+      <div className="ticks"></div>
+
+      <section id="next-steps">
+        <div id="docs">
+          <svg className="icon" role="presentation" aria-hidden="true">
+            <use href="/icons.svg#documentation-icon"></use>
+          </svg>
+          <h2>Documentation</h2>
+          <p>Your questions, answered</p>
+          <ul>
+            <li>
+              <a href="https://vite.dev/" target="_blank">
+                <img className="logo" src={viteLogo} alt="" />
+                Explore Vite
+              </a>
+            </li>
+            <li>
+              <a href="https://react.dev/" target="_blank">
+                <img className="button-icon" src={reactLogo} alt="" />
+                Learn more
+              </a>
+            </li>
+          </ul>
+        </div>
+        <div id="social">
+          <svg className="icon" role="presentation" aria-hidden="true">
+            <use href="/icons.svg#social-icon"></use>
+          </svg>
+          <h2>Connect with us</h2>
+          <p>Join the Vite community</p>
+          <ul>
+            <li>
+              <a href="https://github.com/vitejs/vite" target="_blank">
+                <svg
+                  className="button-icon"
+                  role="presentation"
+                  aria-hidden="true"
+                >
+                  <use href="/icons.svg#github-icon"></use>
+                </svg>
+                GitHub
+              </a>
+            </li>
+            <li>
+              <a href="https://chat.vite.dev/" target="_blank">
+                <svg
+                  className="button-icon"
+                  role="presentation"
+                  aria-hidden="true"
+                >
+                  <use href="/icons.svg#discord-icon"></use>
+                </svg>
+                Discord
+              </a>
+            </li>
+            <li>
+              <a href="https://x.com/vite_js" target="_blank">
+                <svg
+                  className="button-icon"
+                  role="presentation"
+                  aria-hidden="true"
+                >
+                  <use href="/icons.svg#x-icon"></use>
+                </svg>
+                X.com
+              </a>
+            </li>
+            <li>
+              <a href="https://bsky.app/profile/vite.dev" target="_blank">
+                <svg
+                  className="button-icon"
+                  role="presentation"
+                  aria-hidden="true"
+                >
+                  <use href="/icons.svg#bluesky-icon"></use>
+                </svg>
+                Bluesky
+              </a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <div className="ticks"></div>
+      <section id="spacer"></section>
+    </>
+  )
 }
+
+export default App

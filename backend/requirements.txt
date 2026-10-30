@@ -1,0 +1,9 @@
+
+fastapi
+uvicorn[standard]
+numpy
+pytest
+fastapi
+uvicorn[standard]
+numpy
+pytest
