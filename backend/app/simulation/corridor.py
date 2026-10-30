@@ -159,6 +159,15 @@ class CorridorConfig:
     flush_threshold: float = 0.6
     max_extension_s: int = 20
     record_history: bool = True
+    # Traffic surge (optional). Leave start/end as None for no surge.
+    surge_start_s: Optional[int] = None
+    surge_end_s: Optional[int] = None
+    surge_multiplier: float = 1.0
+    # Lane closure (optional). closure_junction=None means no closure.
+    closure_junction: Optional[int] = None
+    closure_start_s: int = 0
+    closure_end_s: Optional[int] = None          # None = closed until the end of the run
+    closure_lanes_closed: int = 1
 
     def __post_init__(self) -> None:
         s = lambda k, v: object.__setattr__(self, k, v)  # noqa: E731 (frozen dataclass)
@@ -194,6 +203,47 @@ class CorridorConfig:
         s("max_extension_s", _check_int("max_extension_s", self.max_extension_s, 0, 120))
         if not isinstance(self.record_history, bool):
             raise SimulationConfigError("record_history must be true or false.")
+        # ---- traffic surge checks ----
+        s("surge_multiplier", _check_number(
+            "surge_multiplier", self.surge_multiplier, 1.0, MAX_TRAFFIC_MULTIPLIER))
+        if (self.surge_start_s is None) != (self.surge_end_s is None):
+            raise SimulationConfigError(
+                "Give both surge_start_s and surge_end_s, or leave both empty for no surge.")
+        if self.surge_start_s is not None:
+            s("surge_start_s", _check_int(
+                "surge_start_s", self.surge_start_s, 0, self.duration_s - 1))
+            s("surge_end_s", _check_int(
+                "surge_end_s", self.surge_end_s, 1, self.duration_s))
+            if self.surge_end_s <= self.surge_start_s:
+                raise SimulationConfigError("surge_end_s must be later than surge_start_s.")
+        # ---- lane closure checks ----
+        if self.closure_junction is not None:
+            s("closure_junction", _check_int(
+                "closure_junction", self.closure_junction, 0, N_JUNCTIONS - 1))
+            s("closure_start_s", _check_int(
+                "closure_start_s", self.closure_start_s, 0, self.duration_s - 1))
+            if self.closure_end_s is not None:
+                s("closure_end_s", _check_int(
+                    "closure_end_s", self.closure_end_s, 1, self.duration_s))
+                if self.closure_end_s <= self.closure_start_s:
+                    raise SimulationConfigError("closure_end_s must be later than closure_start_s.")
+            s("closure_lanes_closed", _check_int(
+                "closure_lanes_closed", self.closure_lanes_closed, 1, self.main_lanes))
+
+    def closure_active(self, junction: int, t: int) -> bool:
+        if self.closure_junction != junction or t < self.closure_start_s:
+            return False
+        return self.closure_end_s is None or t < self.closure_end_s
+
+    def open_main_lanes(self, junction: int, t: int) -> int:
+        """Main-road lanes that can discharge at ``junction`` at time ``t``."""
+        if self.closure_active(junction, t):
+            return self.main_lanes - self.closure_lanes_closed
+        return self.main_lanes
+
+    @property
+    def has_surge(self) -> bool:
+        return self.surge_start_s is not None and self.surge_multiplier != 1.0
 
     @property
     def duration_s(self) -> int:
@@ -235,15 +285,34 @@ class CorridorDemand:
 
 
 def generate_demand(config: CorridorConfig) -> CorridorDemand:
-    """Reproducible Poisson arrivals; draw order is fixed so a seed gives one demand set."""
+    """Reproducible Poisson arrivals; draw order is fixed so a seed gives one demand set.
+
+    Traffic surge: for every second t with surge_start_s <= t < surge_end_s, the
+    arrival rate on every road (main and side) is multiplied by surge_multiplier.
+    The surge is built into this shared demand, so all strategies see it equally.
+    Without a surge the original code path runs, so old results are unchanged.
+    """
     rng = np.random.default_rng(config.seed)
     n = config.duration_s // TIME_STEP_S
     m = config.traffic_multiplier
-    main = rng.poisson(config.main_vph * m / 3600.0 * TIME_STEP_S, size=n).astype(np.int64)
+    if config.has_surge:
+        t = np.arange(n) * TIME_STEP_S
+        in_surge = (t >= config.surge_start_s) & (t < config.surge_end_s)
+        shape = np.where(in_surge, config.surge_multiplier, 1.0)   # per-second rate factor
+    else:
+        shape = None
+
+    def draw(rate_vph: float) -> np.ndarray:
+        lam = rate_vph * m / 3600.0 * TIME_STEP_S
+        if shape is None:
+            return rng.poisson(lam, size=n).astype(np.int64)
+        return rng.poisson(lam * shape).astype(np.int64)
+
+    main = draw(config.main_vph)
     side = np.zeros((N_JUNCTIONS, len(SIDE_APPROACHES), n), dtype=np.int64)
     for j in range(N_JUNCTIONS):
         for k in range(len(SIDE_APPROACHES)):
-            side[j, k] = rng.poisson(config.side_vph[j] * m / 3600.0 * TIME_STEP_S, size=n)
+            side[j, k] = draw(config.side_vph[j])
     return CorridorDemand(main=main, side=side)
 
 
@@ -471,11 +540,12 @@ def run_corridor(config: CorridorConfig, strategy: str = "fixed_time",
             if not c.main_is_green():
                 main_credit[j] = 0.0
                 continue
-            main_credit[j] += main_rate
+            rate_j = config.open_main_lanes(j, t) * dt / DISCHARGE_HEADWAY_S  # lane closure
+            main_credit[j] += rate_j
             while q and main_credit[j] >= 1.0 - _EPS:
                 if j < N_LINKS and occupancy(j) >= storage:
                     blocked_now[j] = True                    # spillback: road ahead is full
-                    main_credit[j] = min(main_credit[j], max(1.0, main_rate))
+                    main_credit[j] = min(main_credit[j], max(1.0, rate_j))
                     break
                 veh = q.popleft()
                 main_credit[j] -= 1.0
@@ -513,6 +583,7 @@ def run_corridor(config: CorridorConfig, strategy: str = "fixed_time",
                 "t": t,
                 "junctions": [{
                     "phase": c.phase.value, "mode": c.mode,
+                    "closure": config.closure_active(j, t),
                     "lights": {d.value: l.value for d, l in c.lights().items()},
                     "queues": {"main": len(main_q[j]), "N": len(side_q[j][0]), "S": len(side_q[j][1])},
                 } for j, c in enumerate(ctrls)],
@@ -593,6 +664,13 @@ def run_corridor(config: CorridorConfig, strategy: str = "fixed_time",
             "ambulance": amb_summary,
             "recovery": recovery,
             "recovery_time_s": max(rec_times) if rec_times else None,
+            "lane_closure": None if config.closure_junction is None else {
+                "junction": config.closure_junction,
+                "start_s": config.closure_start_s,
+                "end_s": config.closure_end_s,
+                "lanes_closed": config.closure_lanes_closed,
+                "lanes_open": config.main_lanes - config.closure_lanes_closed,
+            },
             "all_recovered": all(c.mode == "normal" for c in ctrls),
         },
         "transitions": [[{"t": a, "from": b.value, "to": c_.value} for a, b, c_ in c.transitions]
@@ -670,4 +748,10 @@ def corridor_assumptions() -> dict[str, Any]:
         "spillback_event": "onset of an interval where a green main approach is blocked by a full road",
         "preemption": "hold main green / truncate side green after min green; yellow and all-red never skipped",
         "recovery": "side street served next; recovery ends when the next main green starts",
+        "traffic_surge": ("optional window [surge_start_s, surge_end_s) where every road's arrival "
+                          "rate is multiplied by surge_multiplier; part of the shared demand"),
+        "lane_closure": ("main-road lanes closed just past one junction's stop line for a time "
+                         "window; that junction's main discharge rate drops in proportion to the "
+                         "open lanes (zero if all closed). Arrivals are unchanged. The ambulance "
+                         "uses the same queue, so it is delayed by the closure too."),
     }

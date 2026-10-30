@@ -12,6 +12,7 @@ from app.simulation.corridor import (
     compare_strategies,
     corridor_assumptions,
 )
+from app.scenario_routes import router as scenario_router
 
 app = FastAPI(
     title="TrafficTwin API",
@@ -102,3 +103,4 @@ def compare_corridor_multi_seed(request: MultiSeedRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+app.include_router(scenario_router)
