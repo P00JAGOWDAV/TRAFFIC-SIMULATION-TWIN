@@ -1,8 +1,10 @@
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from app.simulation.config import SimulationConfigError
@@ -20,13 +22,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Allow the local Vite frontend to call this backend.
+# Allow the local Vite frontend (any localhost port) to call this backend.
+# On the server the website is served by this app itself, so CORS is not needed there.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
@@ -43,7 +43,7 @@ class MultiSeedRequest(BaseModel):
     seeds: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5])
 
 
-@app.get("/")
+@app.get("/api")
 def root():
     return {
         "name": "TrafficTwin API",
@@ -103,4 +103,12 @@ def compare_corridor_multi_seed(request: MultiSeedRequest):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 app.include_router(scenario_router)
+
+# Serve the built website (frontend/dist) from this same server, if it exists.
+# This must stay LAST so the /api routes above are matched first.
+FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+if FRONTEND_DIST.is_dir():
+    app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

@@ -12,7 +12,9 @@ import './App.css'
 import './Enhancements.css'
 import ScenarioLab from "./ScenarioLab.jsx";
 
-const API = 'http://127.0.0.1:8000'
+// On your laptop (npm run dev) the backend is on port 8000.
+// On the server, the backend serves the website itself, so use the same address.
+const API = import.meta.env.DEV ? 'http://127.0.0.1:8000' : ''
 
 // Same names as the Scenario Lab, so the whole page uses one vocabulary.
 const strategies = [
